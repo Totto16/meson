@@ -12,6 +12,8 @@ import typing as T
 from glob import glob
 from .wrap import (
     DEFAULT_WRAPDB_HOST,
+    create_wrapdb_host_lookup_state,
+    get_wrapdb_host_for_name,
     open_wrapdburl,
     read_and_decompress,
     WrapException,
@@ -25,14 +27,8 @@ from .. import mesonlib, msubprojects
 
 if T.TYPE_CHECKING:
     import argparse
-    from typing_extensions import TypedDict
 
-    from .wrap import WrapDBV2, WrapDBProgramsV2, WrapDBDepsV2
-
-    WrapHostLookupState = TypedDict(
-        "WrapHostLookupState",
-        {"deps": WrapDBDepsV2, "programs": WrapDBProgramsV2},
-    )
+    from .wrap import WrapDBV2, WrapHostLookupState
 
 
 # Note: when adding arguments, please also add them to the completion
@@ -80,7 +76,7 @@ def add_arguments(parser: "argparse.ArgumentParser") -> None:
         help="Allow insecure server connections.",
     )
     p.add_argument(
-        "--additional-wrap-host",
+        "--additional-wrapdb-host",
         default=[],
         action="append",
         help="Add additional wrapdb hosts, from where packages can be installed.",
@@ -135,7 +131,7 @@ def add_arguments(parser: "argparse.ArgumentParser") -> None:
         help="Allow insecure server connections.",
     )
     p.add_argument(
-        "--additional-wrap-host",
+        "--additional-wrapdb-host",
         default=[],
         action="append",
         help="Add additional wrapdb hosts, they are added to the wrapdb.json.",
@@ -165,11 +161,11 @@ def list_projects(options: "argparse.Namespace") -> None:
             "Subproject dir not found. Run this script in your source root directory."
         )
 
-    wrap_hosts = get_hosts(subproject_dir_name)
-    for wrap_host in wrap_hosts:
+    wrapdb_hosts = get_hosts(subproject_dir_name)
+    for wrapdb_host in wrapdb_hosts:
         if options.separate_by_host:
-            print(f"Host {wrap_host}:")
-        releases = get_releases(options.allow_insecure, wrap_host)
+            print(f"Host {wrapdb_host}:")
+        releases = get_releases(options.allow_insecure, wrapdb_host)
         for p in releases.keys():
             print(f"\t{p}" if options.separate_by_host else p)
 
@@ -183,26 +179,28 @@ def search(options: "argparse.Namespace") -> None:
             "Subproject dir not found. Run this script in your source root directory."
         )
 
-    wrap_hosts = get_hosts(subproject_dir_name)
+    wrapdb_hosts = get_hosts(subproject_dir_name)
 
-    for wrap_host in wrap_hosts:
-        releases = get_releases(options.allow_insecure, wrap_host)
+    for wrapdb_host in wrapdb_hosts:
+        releases = get_releases(options.allow_insecure, wrapdb_host)
         for p, info in releases.items():
             if p.find(name) != -1:
-                print(f"Host {wrap_host}: {p}" if options.print_host else p)
+                print(f"Host {wrapdb_host}: {p}" if options.print_host else p)
             else:
                 for dep in info.get("dependency_names", []):
                     if dep.find(name) != -1:
                         if options.print_host:
-                            print(f"Dependency {dep} found at {wrap_host} in wrap {p}")
+                            print(
+                                f"Dependency {dep} found at {wrapdb_host} in wrap {p}"
+                            )
                         else:
                             print(f"Dependency {dep} found in wrap {p}")
 
 
 def get_latest_version(
-    name: str, allow_insecure: bool, wrap_host: str
+    name: str, allow_insecure: bool, wrapdb_host: str
 ) -> T.Tuple[str, str]:
-    releases = get_releases(allow_insecure, wrap_host)
+    releases = get_releases(allow_insecure, wrapdb_host)
     info = releases.get(name)
     if not info:
         raise WrapException(f"Wrap {name} not found in wrapdb")
@@ -212,7 +210,7 @@ def get_latest_version(
 
 
 def install_one(
-    name: str, allow_insecure: bool, wrapdb_hosts: list[str], print_host: bool
+    name: str, allow_insecure: bool, wrapdb_state: WrapHostLookupState, print_host: bool
 ) -> None:
     subproject_dir_name = mesonlib.get_subproject_dir()
     if os.path.isdir(os.path.join(subproject_dir_name, name)):
@@ -221,30 +219,28 @@ def install_one(
     if os.path.exists(wrapfile):
         raise SystemExit(f"Wrap file for {name} already exists.")
 
-    for wrapdb_host in wrapdb_hosts:
-        version, revision = get_latest_version(name, allow_insecure, wrapdb_host)
+    wrapdb_host = get_wrapdb_host_for_name(wrapdb_state, name)
+    if wrapdb_host is None:
+        raise WrapException("Couldn't determine host for subproject")
 
-        try:
-            url: HTTPResponse = open_wrapdburl(
-                f"https://{wrapdb_host}/v2/{name}_{version}-{revision}/{name}.wrap",
-                wrapdb_host,
-                allow_insecure,
-                True,
-                True,
-            )
-            with open(wrapfile, "wb") as f:
-                f.write(read_and_decompress(url))
+    version, revision = get_latest_version(name, allow_insecure, wrapdb_host)
 
-            if print_host:
-                print(
-                    f"Installed {name} version {version} revision {revision} from {wrapdb_host}"
-                )
-            else:
-                print(f"Installed {name} version {version} revision {revision}")
+    url: HTTPResponse = open_wrapdburl(
+        f"https://{wrapdb_host}/v2/{name}_{version}-{revision}/{name}.wrap",
+        wrapdb_host,
+        allow_insecure,
+        True,
+        True,
+    )
+    with open(wrapfile, "wb") as f:
+        f.write(read_and_decompress(url))
 
-            return
-        except WrapException:
-            pass
+    if print_host:
+        print(
+            f"Installed {name} version {version} revision {revision} from {wrapdb_host}"
+        )
+    else:
+        print(f"Installed {name} version {version} revision {revision}")
 
 
 def install(options: "argparse.Namespace") -> None:
@@ -259,24 +255,24 @@ def install(options: "argparse.Namespace") -> None:
 
     hosts: set[str] = {DEFAULT_WRAPDB_HOST}
 
-    hosts.update(options.additional_wrap_host)
+    hosts.update(options.additional_wrapdb_host)
 
     if not options.no_wrapdb_hosts_file:
-        wrap_hosts = get_hosts(subproject_dir_name)
-        hosts.update(wrap_hosts)
+        wrapdb_hosts = get_hosts(subproject_dir_name)
+        hosts.update(wrapdb_hosts)
 
         # if we allow the host file, we also update it
         update_hosts(
-            options.allow_insecure, subproject_dir_name, options.additional_wrap_host
+            options.allow_insecure, subproject_dir_name, options.additional_wrapdb_host
         )
 
     failed = 0
 
-    wrapdb_hosts = list(hosts)
+    wrapdb_state = create_wrapdb_host_lookup_state()
 
     for name in dict.fromkeys(options.name):
         try:
-            install_one(name, options.allow_insecure, wrapdb_hosts, print_host)
+            install_one(name, options.allow_insecure, wrapdb_state, print_host)
         except WrapException as e:
             print(str(e), file=sys.stderr)
             failed += 1
@@ -286,7 +282,7 @@ def install(options: "argparse.Namespace") -> None:
 
 
 def get_current_version(
-    wrapfile: str, wrap_host: str
+    wrapfile: str, wrapdb_host: str
 ) -> T.Tuple[str, str, str, str, T.Optional[str]]:
     cp = configparser.ConfigParser(interpolation=None)
     cp.read(wrapfile)
@@ -303,7 +299,7 @@ def get_current_version(
         branch = mesonlib.search_version(wrap_data["source_filename"])
         revision, patch_filename = "1", None
     else:
-        branch, revision = parse_patch_url(patch_url, wrap_host)
+        branch, revision = parse_patch_url(patch_url, wrapdb_host)
         patch_filename = wrap_data["patch_filename"]
     return (
         branch,
@@ -328,18 +324,18 @@ def info(options: "argparse.Namespace") -> None:
             "Subproject dir not found. Run this script in your source root directory."
         )
 
-    wrap_hosts = get_hosts(subproject_dir_name)
+    wrapdb_hosts = get_hosts(subproject_dir_name)
 
     found: bool = False
 
-    for wrap_host in wrap_hosts:
-        releases = get_releases(options.allow_insecure, wrap_host)
+    for wrapdb_host in wrapdb_hosts:
+        releases = get_releases(options.allow_insecure, wrapdb_host)
         info = releases.get(name)
         if not info:
             continue
 
         if print_host:
-            print(f"Available versions of {name} ar {wrap_host}:")
+            print(f"Available versions of {name} at {wrapdb_host}:")
         else:
             print(f"Available versions of {name}:")
 
@@ -407,25 +403,6 @@ def promote(options: "argparse.Namespace") -> None:
     do_promotion(matches[0], spdir_name)
 
 
-def create_wrap_host_lookup_state() -> WrapHostLookupState:
-    # use the wrapdb.json file if available, if not we could create it in memory and use that, this doesn't need to be up to date, as we
-    pass
-
-
-def get_wrap_host_for_name(state: WrapHostLookupState, name: str) -> T.Optional[str]:
-    dep = state["deps"]["entries"].get(name, None)
-
-    if dep is not None:
-        return dep["host"]
-
-    program = state["programs"]["entries"].get(name, None)
-
-    if program is not None:
-        return program["host"]
-
-    return None
-
-
 def status(options: "argparse.Namespace") -> None:
     print("Subproject status")
     subdir = mesonlib.unwrap(
@@ -433,23 +410,23 @@ def status(options: "argparse.Namespace") -> None:
         "This should only happen in a non-native subproject",
     )
 
-    state = create_wrap_host_lookup_state()
+    wrapdb_state = create_wrapdb_host_lookup_state()
 
     for w in glob(f"{subdir}/*.wrap"):
         name = os.path.basename(w)[:-5]
         try:
-            wrap_host = get_wrap_host_for_name(state, name)
-            if wrap_host is None:
+            wrapdb_host = get_wrapdb_host_for_name(wrapdb_state, name)
+            if wrapdb_host is None:
                 raise WrapException("Couldn't determine host for subproject")
             latest_branch, latest_revision = get_latest_version(
-                name, options.allow_insecure, wrap_host
+                name, options.allow_insecure, wrapdb_host
             )
         except Exception:
             print("", name, "not available in wrapdb.", file=sys.stderr)
             continue
         try:
             current_branch, current_revision, _, _, _ = get_current_version(
-                w, wrap_host
+                w, wrapdb_host
             )
         except Exception:
             print("", name, "Wrap file not from wrapdb.", file=sys.stderr)
@@ -481,21 +458,21 @@ def update_db(options: "argparse.Namespace") -> None:
 
     hosts: set[str] = {DEFAULT_WRAPDB_HOST}
 
-    hosts.update(options.additional_wrap_host)
+    hosts.update(options.additional_wrapdb_host)
 
     if not no_wrapdb_hosts_file:
-        wrap_hosts = get_hosts(subproject_dir_name)
-        hosts.update(wrap_hosts)
+        wrapdb_hosts = get_hosts(subproject_dir_name)
+        hosts.update(wrapdb_hosts)
 
         # if we allow the host file, we also update it
         update_hosts(
-            options.allow_insecure, subproject_dir_name, options.additional_wrap_host
+            options.allow_insecure, subproject_dir_name, options.additional_wrapdb_host
         )
 
     wrapdb_data: WrapDBV2 = {"version": "2", "entries": []}
-    for wrap_host in wrap_hosts:
-        data = get_releases_data(options.allow_insecure, wrap_host)
-        wrapdb_data["entries"].append({"host": wrap_host, "entries": data})
+    for wrapdb_host in hosts:
+        data = get_releases_data(options.allow_insecure, wrapdb_host)
+        wrapdb_data["entries"].append({"host": wrapdb_host, "entries": data})
 
     os.makedirs(subproject_dir_name, exist_ok=True)
     with open(os.path.join(subproject_dir_name, "wrapdb.json"), "wb") as f:
@@ -510,7 +487,7 @@ def add_host(options: "argparse.Namespace") -> None:
             "Subprojects dir not found. Run this script in your source root directory."
         )
 
-    new_hosts = [host for host in dict.fromkeys(options.host)]
+    new_hosts = list(dict.fromkeys(options.host))
 
     # if we allow the host file, we also update it
     failed = update_hosts(options.allow_insecure, subproject_dir_name, new_hosts)

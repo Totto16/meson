@@ -783,7 +783,7 @@ _meson-wrap-install() {
 
   longopts=(
     allow-insecure
-    additional-wrap-host
+    additional-wrapdb-host
     no-wrapdb-hosts-file
     help
   )
@@ -962,7 +962,7 @@ _meson-wrap-update-db() {
 
   longopts=(
     allow-insecure
-    additional-wrap-host
+    additional-wrapdb-host
     help
   )
 
