@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from .. import mlog
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -786,7 +786,7 @@ def split_wrapdb_json(
             wrap_names[name] = host
 
             for dep_name in info.get("dependency_names", []):
-                prev_dep = wrapdb_provided_deps.get(name, None)
+                prev_dep = wrapdb_provided_deps.get(dep_name, None)
                 if prev_dep is not None:
                     m = f"Multiple wrap hoster provide {dep_name} dependency: {name} at host {host} and {prev_dep['name']} at {prev_dep['host']}"
                     raise WrapException(m)
@@ -819,7 +819,7 @@ class Resolver:
     wrap_frontend: bool = False
     allow_insecure: bool = False
     silent: bool = False
-    allowed_wrapdb_hosts: list[str] = []
+    allowed_wrapdb_hosts: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.subdir_root = os.path.join(self.source_dir, self.subdir)
