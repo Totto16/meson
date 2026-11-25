@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from .. import mlog
 from http.client import HTTPResponse
 import sys, os
 import configparser
@@ -444,13 +445,13 @@ def status(options: "argparse.Namespace") -> None:
             print(
                 "",
                 name,
-                f"up to date. Branch {current_branch}, revision {current_revision}.",
+                f"up to date. Branch {mlog.blue(current_branch)}, revision {mlog.green(current_revision)}.",
             )
         else:
             print(
                 "",
                 name,
-                f"not up to date. Have {current_branch} {current_revision}, but {latest_branch} {latest_revision} is available.",
+                f"not up to date. Have {mlog.blue(current_branch)} {mlog.green(current_revision)}, but {mlog.blue(latest_branch)} {mlog.green(latest_revision)} is available.",
             )
 
 

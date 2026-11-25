@@ -43,6 +43,7 @@ from ..mesonlib import (
     Popen_safe,
     SubProject,
 )
+
 from ..interpreterbase import FeatureNew
 from .. import mesonlib
 
