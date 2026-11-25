@@ -748,8 +748,8 @@ class Interpreter:
         )
         manifest = self._load_manifest(subdir)
         downloaded = (
-            subp_name in self.environment.wrap_resolver.wraps_v2
-            and self.environment.wrap_resolver.wraps_v2[subp_name].type is not None
+            subp_name in self.environment.wrap_resolver.wraps
+            and self.environment.wrap_resolver.wraps[subp_name].type is not None
         )
 
         ws = self._get_workspace(manifest, subdir, None, downloaded=downloaded)

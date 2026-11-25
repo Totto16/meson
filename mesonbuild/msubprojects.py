@@ -950,11 +950,11 @@ def run(options: "Arguments") -> int:
     if options.subprojects:
         wraps = [
             wrap
-            for name, wrap in r.wraps_v2.items()
+            for name, wrap in r.wraps.items()
             if any(fnmatch.fnmatch(name, pat) for pat in options.subprojects)
         ]
     else:
-        wraps = list(r.wraps_v2.values())
+        wraps = list(r.wraps.values())
     types = [t.strip() for t in options.types.split(",")] if options.types else []
     for t in types:
         if t not in tuple(WrapType):

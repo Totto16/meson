@@ -829,13 +829,13 @@ class Resolver:
         self.cachedir = os.environ.get("MESON_PACKAGE_CACHE_DIR") or os.path.join(
             self.subdir_root, "packagecache"
         )
-        self.wraps_v2: T.Dict[str, PackageDefinitionWithHost] = {}
+        self.wraps: T.Dict[str, PackageDefinitionWithHost] = {}
         self.netrc: T.Optional[netrc] = None
-        self.provided_deps_v2: T.Dict[str, PackageDefinitionWithHost] = {}
-        self.provided_programs_v2: T.Dict[str, PackageDefinitionWithHost] = {}
-        self.wrapdb_v2: WrapDBV2Entries = []
-        self.wrapdb_provided_deps_v2: WrapDBDepsV2Entries = {}
-        self.wrapdb_provided_programs_v2: WrapDBProgramsV2Entries = {}
+        self.provided_deps: T.Dict[str, PackageDefinitionWithHost] = {}
+        self.provided_programs: T.Dict[str, PackageDefinitionWithHost] = {}
+        self.wrapdb_entries: WrapDBV2Entries = []
+        self.wrapdb_provided_deps: WrapDBDepsV2Entries = {}
+        self.wrapdb_provided_programs: WrapDBProgramsV2Entries = {}
         self.allowed_wrapdb_hosts = [DEFAULT_WRAPDB_HOST]
         self.loaded_dirs: T.Set[str] = set()
         self.cargolocks: T.Dict[str, T.Optional[CargoLock]] = {}
@@ -858,7 +858,7 @@ class Resolver:
             _root, dirs, files = next(os.walk(self.subdir_root))
 
             wrapdb_state = create_wrapdb_host_lookup_state(
-                self.allow_insecure, self.wrapdb_v2
+                self.allow_insecure, self.wrapdb_entries
             )
 
             for i in files:
@@ -869,10 +869,10 @@ class Resolver:
                 wrap = PackageDefinitionWithHost.from_wrap_file_state(
                     fname, wrapdb_state, self.subproject
                 )
-                self.wraps_v2[wrap.name] = wrap
+                self.wraps[wrap.name] = wrap
             # Add dummy package definition for directories not associated with a wrap file.
             ignore_dirs = {"packagecache", "packagefiles"}
-            for wrap in self.wraps_v2.values():
+            for wrap in self.wraps.values():
                 ignore_dirs |= {wrap.directory, wrap.name}
             for i in dirs:
                 if i in ignore_dirs:
@@ -881,9 +881,9 @@ class Resolver:
                 wrap = PackageDefinitionWithHost.from_directory_state(
                     fname, wrapdb_state
                 )
-                self.wraps_v2[wrap.name] = wrap
+                self.wraps[wrap.name] = wrap
         # Add provided deps and programs into our lookup tables
-        for wrap in self.wraps_v2.values():
+        for wrap in self.wraps.values():
             self.add_wrap(wrap)
         self.get_cargo_lock(self.project_subdir, warn_only=True)
         self.loaded_dirs.add(self.subdir)
@@ -928,17 +928,17 @@ class Resolver:
         self, wrap: PackageDefinitionWithHost, ignore_dups: bool = False
     ) -> None:
         for k in wrap.provided_deps.keys():
-            if k not in self.provided_deps_v2:
-                self.provided_deps_v2[k] = wrap
+            if k not in self.provided_deps:
+                self.provided_deps[k] = wrap
             elif not ignore_dups:
-                prev_wrap = self.provided_deps_v2[k]
+                prev_wrap = self.provided_deps[k]
                 m = f"Multiple wrap files provide {k!r} dependency: {wrap.name} and {prev_wrap.name}"
                 raise WrapException(m)
         for k in wrap.provided_programs:
-            if k not in self.provided_programs_v2:
-                self.provided_programs_v2[k] = wrap
+            if k not in self.provided_programs:
+                self.provided_programs[k] = wrap
             elif not ignore_dups:
-                prev_wrap = self.provided_programs_v2[k]
+                prev_wrap = self.provided_programs[k]
                 m = f"Multiple wrap files provide {k!r} program: {wrap.name} and {prev_wrap.name}"
                 raise WrapException(m)
 
@@ -948,14 +948,14 @@ class Resolver:
         if wrapdb is None:
             return None
 
-        self.wrapdb_v2 = wrapdb["entries"]
+        self.wrapdb_entries = wrapdb["entries"]
 
-        wrapdb_deps, wrapdb_programs = split_wrapdb_json(self.wrapdb_v2)
-        self.wrapdb_provided_deps_v2 = wrapdb_deps
-        self.wrapdb_provided_programs_v2 = wrapdb_programs
+        wrapdb_deps, wrapdb_programs = split_wrapdb_json(self.wrapdb_entries)
+        self.wrapdb_provided_deps = wrapdb_deps
+        self.wrapdb_provided_programs = wrapdb_programs
 
     def load_wrapdb_hosts(self) -> None:
-        hosts = get_hosts(self.subdir_root)
+        hosts: list[str] = get_hosts(self.subdir_root)
 
         self.allowed_wrapdb_hosts = hosts
 
@@ -965,7 +965,7 @@ class Resolver:
         wrapdb_host: str = ""
         found = False
 
-        for entry in self.wrapdb_v2:
+        for entry in self.wrapdb_entries:
             info = entry["entries"].get(subp_name)
             if not info:
                 continue
@@ -991,13 +991,13 @@ class Resolver:
         wrap = PackageDefinitionWithHost.from_wrap_file_extended(
             str(fname), wrapdb_host
         )
-        self.wraps_v2[wrap.name] = wrap
+        self.wraps[wrap.name] = wrap
         self.add_wrap(wrap)
         return wrap
 
     def merge_wraps(self, wraps: T.Dict[str, PackageDefinitionWithHost]) -> None:
         for k, v in wraps.items():
-            prev_wrap = self.wraps_v2.get(v.directory)
+            prev_wrap = self.wraps.get(v.directory)
             if prev_wrap and prev_wrap.type is None and v.type is not None:
                 # This happens when a subproject has been previously downloaded
                 # using a wrap from another subproject and the wrap-redirect got
@@ -1005,10 +1005,10 @@ class Resolver:
                 # for the download directory, but now we have a proper wrap.
                 # It also happens for wraps coming from Cargo.lock files, which
                 # don't create wrap-redirect.
-                del self.wraps_v2[v.directory]
-                del self.provided_deps_v2[v.directory.lower()]
-            if k not in self.wraps_v2:
-                self.wraps_v2[k] = v
+                del self.wraps[v.directory]
+                del self.provided_deps[v.directory.lower()]
+            if k not in self.wraps:
+                self.wraps[k] = v
                 # it's fine if a dependency or program is provided by a wrap
                 # from *another* project (including the superproject).
                 self.add_wrap(v, ignore_dups=True)
@@ -1024,12 +1024,12 @@ class Resolver:
                 self.allow_insecure,
                 self.silent,
             )
-            self.merge_wraps(other_resolver.wraps_v2)
+            self.merge_wraps(other_resolver.wraps)
             self.cargolocks.update(other_resolver.cargolocks)
             self.loaded_dirs.add(subdir)
 
     def get_directory(self, packagename: str) -> T.Optional[str]:
-        wrap = self.wraps_v2.get(packagename)
+        wrap = self.wraps.get(packagename)
         if wrap:
             return None if wrap.redirected else wrap.directory
         return packagename
@@ -1040,15 +1040,15 @@ class Resolver:
         # Python's ini parser converts all key values to lowercase.
         # Thus the query name must also be in lower case.
         packagename = packagename.lower()
-        wrap = self.provided_deps_v2.get(packagename)
+        wrap = self.provided_deps.get(packagename)
         if wrap:
             dep_var = wrap.provided_deps.get(packagename)
             return {"host": wrap.host, "name": wrap.name}, dep_var
-        wrap_entry = self.wrapdb_provided_deps_v2.get(packagename)
+        wrap_entry = self.wrapdb_provided_deps.get(packagename)
         return wrap_entry, None
 
     def get_varname(self, subp_name: str, depname: str) -> T.Optional[str]:
-        wrap = self.wraps_v2.get(subp_name)
+        wrap = self.wraps.get(subp_name)
         return wrap.provided_deps.get(depname) if wrap else None
 
     def find_program_provider(
@@ -1058,10 +1058,10 @@ class Resolver:
             # A File is always a local program, i.e., a script file in the source tree
             if isinstance(name, mesonlib.File):
                 continue
-            wrap = self.provided_programs_v2.get(name)
+            wrap = self.provided_programs.get(name)
             if wrap:
                 return {"host": wrap.host, "subproject": SubProject(wrap.name)}
-            wrap_entry = self.wrapdb_provided_programs_v2.get(name)
+            wrap_entry = self.wrapdb_provided_programs.get(name)
             if wrap_entry:
                 return wrap_entry
         return None
@@ -1071,14 +1071,14 @@ class Resolver:
         packagename: str,
         force_method: T.Optional[Method] = None,
     ) -> T.Tuple[str, Method]:
-        wrap = self.wraps_v2.get(packagename)
+        wrap = self.wraps.get(packagename)
         if wrap is None:
             wrap = self.get_from_wrapdb(packagename)
             if wrap is None:
                 ustr = f"Neither a subproject directory nor a {packagename}.wrap file was found."
                 from difflib import get_close_matches
 
-                close_matches = get_close_matches(packagename, self.wraps_v2.keys())
+                close_matches = get_close_matches(packagename, self.wraps.keys())
                 if close_matches:
                     ustr += f' Did you mean "{close_matches[0]}"?'
                 raise WrapNotFoundException(ustr)
