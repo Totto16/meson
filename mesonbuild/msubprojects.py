@@ -29,6 +29,7 @@ from .wrap.wrap import (
     Resolver,
     WrapException,
     WrapType,
+    get_host_from_package_def,
     get_hosts,
     parse_patch_url,
     update_wrap_file,
@@ -38,7 +39,7 @@ from .wrap.wrap import (
 if T.TYPE_CHECKING:
     from typing_extensions import Protocol, TypeAlias
 
-    from .wrap.wrap import PackageDefinitionWithHost
+    from .wrap.wrap import WrapPackageDefinition
 
     SubParsers = argparse._SubParsersAction[argparse.ArgumentParser]
 
@@ -139,7 +140,7 @@ class Logger:
 class Runner:
     logger: Logger
     r: InitVar[Resolver]
-    wrap: PackageDefinitionWithHost
+    wrap: WrapPackageDefinition
     repo_dir: str
     options: "Arguments"
 
@@ -187,8 +188,13 @@ class Runner:
         self.log(f"Checking latest WrapDB version for {self.wrap.name}...")
         options = T.cast("UpdateWrapDBArguments", self.options)
 
+        wrapdb_host = get_host_from_package_def(self.wrap)
+        if not wrapdb_host:
+            self.log("  -> Wrap not found in any wrapdb")
+            return True
+
         # Check if this wrap is in WrapDB
-        host_info = options.releases.get(self.wrap.host)
+        host_info = options.releases.get(wrapdb_host)
         if not host_info:
             self.log("  -> Wrap not found in any wrapdb")
             return True
@@ -198,7 +204,9 @@ class Runner:
             self.log("  -> Wrap not found in the wrapdb it was originally from")
             return True
 
-        allowed_wrapdb_hosts = [self.wrap.host]
+        allowed_wrapdb_hosts: list[str] = [
+            h for h in [get_host_from_package_def(self.wrap)] if h is not None
+        ]
 
         # Determine current version
         try:
@@ -246,7 +254,7 @@ class Runner:
                 new_branch,
                 new_revision,
                 options.allow_insecure,
-                self.wrap.host,
+                wrapdb_host,
             )
             self.log("  -> New version downloaded:", mlog.blue(latest_version))
         else:

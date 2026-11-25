@@ -431,7 +431,7 @@ def status(options: "argparse.Namespace") -> None:
                 name, options.allow_insecure, wrapdb_host
             )
         except Exception:
-            print("", name, "not available in wrapdb.", file=sys.stderr)
+            print("", name, "not available in any wrapdb.", file=sys.stderr)
             continue
         try:
             current_branch, current_revision, _, _, _ = get_current_version(

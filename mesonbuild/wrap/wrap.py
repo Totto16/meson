@@ -74,7 +74,7 @@ if T.TYPE_CHECKING:
     WrapDBDepsV1 = T.Dict[str, WrapDBDepsV1Content]
 
     WrapDBDepsV2Entry = TypedDict(
-        "WrapDBDepsV2Entry", {"host": str, "name": WrapDBDepsV1Content}
+        "WrapDBDepsV2Entry", {"host": T.Optional[str], "name": WrapDBDepsV1Content}
     )
 
     WrapDBDepsV2Entries: TypeAlias = T.Dict[str, WrapDBDepsV2Entry]
@@ -88,7 +88,7 @@ if T.TYPE_CHECKING:
 
     WrapDBProgramsV2Entry = TypedDict(
         "WrapDBProgramsV2Entry",
-        {"host": str, "subproject": SubProject},
+        {"host": T.Optional[str], "subproject": SubProject},
     )
 
     WrapDBProgramsV2Entries: TypeAlias = T.Dict[str, WrapDBProgramsV2Entry]
@@ -694,32 +694,43 @@ class PackageDefinitionWithHost(PackageDefinition):
         return PackageDefinitionWithHost.from_base(package_def, wrapdb_host)
 
     @staticmethod
-    def from_wrap_file_state(
+    def from_wrap_file_state_opt(
         filename: str,
         wrapdb_state: WrapHostLookupState,
         subproject: SubProject = mesonlib.ROOT_SUBPROJECT,
-    ) -> PackageDefinitionWithHost:
+    ) -> WrapPackageDefinition:
         package_def: PackageDefinition = PackageDefinition.from_wrap_file(
             filename, subproject
         )
 
         wrapdb_host = get_wrapdb_host_for_name(wrapdb_state, package_def.name)
         if wrapdb_host is None:
-            raise WrapException("Couldn't determine host for subproject")
+            return package_def
 
         return PackageDefinitionWithHost.from_base(package_def, wrapdb_host)
 
     @staticmethod
-    def from_directory_state(
+    def from_directory_state_opt(
         filename: str, wrapdb_state: WrapHostLookupState
-    ) -> PackageDefinitionWithHost:
+    ) -> WrapPackageDefinition:
         package_def: PackageDefinition = PackageDefinition.from_directory(filename)
 
         wrapdb_host = get_wrapdb_host_for_name(wrapdb_state, package_def.name)
         if wrapdb_host is None:
-            raise WrapException("Couldn't determine host for subproject")
+            return package_def
 
         return PackageDefinitionWithHost.from_base(package_def, wrapdb_host)
+
+
+if T.TYPE_CHECKING:
+    WrapPackageDefinition = T.Union[PackageDefinitionWithHost | PackageDefinition]
+
+
+def get_host_from_package_def(package_def: WrapPackageDefinition) -> T.Optional[str]:
+    if isinstance(package_def, PackageDefinitionWithHost):
+        return package_def.host
+
+    return None
 
 
 def verbose_git(cmd: T.List[str], workingdir: str, check: bool = False) -> bool:
@@ -829,10 +840,10 @@ class Resolver:
         self.cachedir = os.environ.get("MESON_PACKAGE_CACHE_DIR") or os.path.join(
             self.subdir_root, "packagecache"
         )
-        self.wraps: T.Dict[str, PackageDefinitionWithHost] = {}
+        self.wraps: T.Dict[str, WrapPackageDefinition] = {}
         self.netrc: T.Optional[netrc] = None
-        self.provided_deps: T.Dict[str, PackageDefinitionWithHost] = {}
-        self.provided_programs: T.Dict[str, PackageDefinitionWithHost] = {}
+        self.provided_deps: T.Dict[str, WrapPackageDefinition] = {}
+        self.provided_programs: T.Dict[str, WrapPackageDefinition] = {}
         self.wrapdb_entries: WrapDBV2Entries = []
         self.wrapdb_provided_deps: WrapDBDepsV2Entries = {}
         self.wrapdb_provided_programs: WrapDBProgramsV2Entries = {}
@@ -866,7 +877,7 @@ class Resolver:
                     continue
                 fname = os.path.join(self.subdir_root, i)
 
-                wrap = PackageDefinitionWithHost.from_wrap_file_state(
+                wrap = PackageDefinitionWithHost.from_wrap_file_state_opt(
                     fname, wrapdb_state, self.subproject
                 )
                 self.wraps[wrap.name] = wrap
@@ -878,7 +889,7 @@ class Resolver:
                 if i in ignore_dirs:
                     continue
                 fname = os.path.join(self.subdir_root, i)
-                wrap = PackageDefinitionWithHost.from_directory_state(
+                wrap = PackageDefinitionWithHost.from_directory_state_opt(
                     fname, wrapdb_state
                 )
                 self.wraps[wrap.name] = wrap
@@ -916,17 +927,10 @@ class Resolver:
 
         self.cargolocks[filename] = cargolock
         # TODO: how to solve this?
-        self.merge_wraps(
-            {
-                name: PackageDefinitionWithHost.from_base(wrap, "TODO")
-                for name, wrap in cargolock.wraps.items()
-            }
-        )
+        self.merge_wraps(cargolock.wraps)
         return cargolock
 
-    def add_wrap(
-        self, wrap: PackageDefinitionWithHost, ignore_dups: bool = False
-    ) -> None:
+    def add_wrap(self, wrap: WrapPackageDefinition, ignore_dups: bool = False) -> None:
         for k in wrap.provided_deps.keys():
             if k not in self.provided_deps:
                 self.provided_deps[k] = wrap
@@ -995,7 +999,7 @@ class Resolver:
         self.add_wrap(wrap)
         return wrap
 
-    def merge_wraps(self, wraps: T.Dict[str, PackageDefinitionWithHost]) -> None:
+    def merge_wraps(self, wraps: T.Dict[str, WrapPackageDefinition]) -> None:
         for k, v in wraps.items():
             prev_wrap = self.wraps.get(v.directory)
             if prev_wrap and prev_wrap.type is None and v.type is not None:
@@ -1043,7 +1047,7 @@ class Resolver:
         wrap = self.provided_deps.get(packagename)
         if wrap:
             dep_var = wrap.provided_deps.get(packagename)
-            return {"host": wrap.host, "name": wrap.name}, dep_var
+            return {"host": get_host_from_package_def(wrap), "name": wrap.name}, dep_var
         wrap_entry = self.wrapdb_provided_deps.get(packagename)
         return wrap_entry, None
 
@@ -1060,7 +1064,10 @@ class Resolver:
                 continue
             wrap = self.provided_programs.get(name)
             if wrap:
-                return {"host": wrap.host, "subproject": SubProject(wrap.name)}
+                return {
+                    "host": get_host_from_package_def(wrap),
+                    "subproject": SubProject(wrap.name),
+                }
             wrap_entry = self.wrapdb_provided_programs.get(name)
             if wrap_entry:
                 return wrap_entry
