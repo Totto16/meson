@@ -223,7 +223,7 @@ def install_one(
 
     wrapdb_host = get_wrapdb_host_for_name(wrapdb_state, name)
     if wrapdb_host is None:
-        raise WrapException("Couldn't determine host for subproject")
+        raise WrapException(f"Wrap {name} not found in any wrapdb")
 
     version, revision = get_latest_version(name, allow_insecure, wrapdb_host)
 
