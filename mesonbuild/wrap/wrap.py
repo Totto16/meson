@@ -107,7 +107,7 @@ if T.TYPE_CHECKING:
 
     WrapHostLookupState = TypedDict(
         "WrapHostLookupState",
-        {"deps": WrapDBDepsV2, "programs": WrapDBProgramsV2},
+        {"deps": WrapDBDepsV2Entries, "programs": WrapDBProgramsV2Entries},
     )
 
 
@@ -303,6 +303,7 @@ def get_hosts(subproject_dir_name: str) -> list[str]:
 
 
 def create_wrapdb_host_lookup_state(
+    allow_insecure: bool,
     wrapdb_info: T.Optional[WrapDBV2Entries] = None,
 ) -> WrapHostLookupState:
     # use the wrapdb.json file if available, if not we could create it in memory and use that, this doesn't need to be up to date, as we
@@ -319,20 +320,45 @@ def create_wrapdb_host_lookup_state(
         wrapdb = None if raw_wrapdb is None else raw_wrapdb["entries"]
 
     if wrapdb is None:
-        raise Exception("TODO")
+        wrapdb = []
+        wrapdb_hosts_raw = get_hosts(subproject_dir_name)
 
-    # TODO: check if we have a hosts file, if we have on check that all hosts are in the wrapdb.json file (Don't update it, just fetch the new ones)
+        for wrapdb_host in wrapdb_hosts_raw:
+            data = get_releases_data(allow_insecure, wrapdb_host)
+            wrapdb.append({"host": wrapdb_host, "entries": json.loads(data)})
+    else:
+        # check if we have a hosts file, if we have on check that all hosts are in the wrapdb.json file (Don't update it, just fetch the new ones)
+        wrapdb_hosts: WrapDBHostType
+        try:
+            with Path(subproject_dir_name, "wrapdb_hosts.json").open(
+                "r", encoding="utf-8"
+            ) as f:
+                wrapdb_hosts = json.load(f)
+        except FileNotFoundError:
+            wrapdb_hosts = []
 
-    raise Exception("TODO")
+        for wrapdb_host in wrapdb_hosts:
+
+            data = get_releases_data(allow_insecure, wrapdb_host["host"])
+
+            entries: WrapDBV2EntryValue = {
+                "host": wrapdb_host["host"],
+                "entries": json.loads(data),
+            }
+            wrapdb.append(entries)
+
+    wrapdb_deps, wrapdb_programs = split_wrapdb_json(wrapdb)
+
+    return {"deps": wrapdb_deps, "programs": wrapdb_programs}
 
 
 def get_wrapdb_host_for_name(state: WrapHostLookupState, name: str) -> T.Optional[str]:
-    dep = state["deps"]["entries"].get(name, None)
+    dep = state["deps"].get(name, None)
 
     if dep is not None:
         return dep["host"]
 
-    program = state["programs"]["entries"].get(name, None)
+    program = state["programs"].get(name, None)
 
     if program is not None:
         return program["host"]
@@ -740,6 +766,50 @@ def load_wrapdb_json(subproject_dir_name: str) -> T.Optional[WrapDBV2]:
         return None
 
 
+def split_wrapdb_json(
+    entries: WrapDBV2Entries,
+) -> tuple[WrapDBDepsV2Entries, WrapDBProgramsV2Entries]:
+    wrap_names: T.Dict[str, str] = {}
+
+    wrapdb_provided_deps: WrapDBDepsV2Entries = {}
+    wrapdb_provided_programs: WrapDBProgramsV2Entries = {}
+
+    for entry in entries:
+        host = entry["host"]
+        for name, info in entry["entries"].items():
+
+            prev_wrap_name = wrap_names.get(name, None)
+            if prev_wrap_name is not None:
+                m = f"Multiple wrap hoster provide {name} wrap: host {host} and {prev_wrap_name}"
+                raise WrapException(m)
+
+            wrap_names[name] = host
+
+            for dep_name in info.get("dependency_names", []):
+                prev_dep = wrapdb_provided_deps.get(name, None)
+                if prev_dep is not None:
+                    m = f"Multiple wrap hoster provide {dep_name} dependency: {name} at host {host} and {prev_dep['name']} at {prev_dep['host']}"
+                    raise WrapException(m)
+
+                wrapdb_provided_deps[dep_name] = {
+                    "host": host,
+                    "name": name,
+                }
+
+            for program_name in info.get("program_names", []):
+                prev_program = wrapdb_provided_programs.get(program_name, None)
+                if prev_program is not None:
+                    m = f"Multiple wrap hoster provide {program_name} program: {host} and {prev_program['host']}"
+                    raise WrapException(m)
+
+                wrapdb_provided_programs[program_name] = {
+                    "host": host,
+                    "subproject": SubProject(name),
+                }
+
+    return (wrapdb_provided_deps, wrapdb_provided_programs)
+
+
 @dataclass(eq=False)
 class Resolver:
     source_dir: str
@@ -754,7 +824,7 @@ class Resolver:
     def __post_init__(self) -> None:
         self.subdir_root = os.path.join(self.source_dir, self.subdir)
         self.project_subdir = os.path.relpath(
-            os.path.dirname(self.subdir_root), self.source_dir
+            os.path.dirname(p=self.subdir_root), self.source_dir
         )
         self.cachedir = os.environ.get("MESON_PACKAGE_CACHE_DIR") or os.path.join(
             self.subdir_root, "packagecache"
@@ -787,7 +857,9 @@ class Resolver:
         if os.path.isdir(self.subdir_root):
             _root, dirs, files = next(os.walk(self.subdir_root))
 
-            wrapdb_state = create_wrapdb_host_lookup_state(self.wrapdb_v2)
+            wrapdb_state = create_wrapdb_host_lookup_state(
+                self.allow_insecure, self.wrapdb_v2
+            )
 
             for i in files:
                 if not i.endswith(".wrap"):
@@ -878,41 +950,9 @@ class Resolver:
 
         self.wrapdb_v2 = wrapdb["entries"]
 
-        wrap_names: T.Dict[str, str] = {}
-        for entry in self.wrapdb_v2:
-            host = entry["host"]
-            for name, info in entry["entries"].items():
-
-                prev_wrap_name = wrap_names.get(name, None)
-                if prev_wrap_name is not None:
-                    m = f"Multiple wrap hoster provide {name} wrap: host {host} and {prev_wrap_name}"
-                    raise WrapException(m)
-
-                wrap_names[name] = host
-
-                for dep_name in info.get("dependency_names", []):
-                    prev_dep = self.wrapdb_provided_deps_v2.get(name, None)
-                    if prev_dep is not None:
-                        m = f"Multiple wrap hoster provide {dep_name} dependency: {name} at host {host} and {prev_dep['name']} at {prev_dep['host']}"
-                        raise WrapException(m)
-
-                    self.wrapdb_provided_deps_v2[dep_name] = {
-                        "host": host,
-                        "name": name,
-                    }
-
-                for program_name in info.get("program_names", []):
-                    prev_program = self.wrapdb_provided_programs_v2.get(
-                        program_name, None
-                    )
-                    if prev_program is not None:
-                        m = f"Multiple wrap hoster provide {program_name} program: {host} and {prev_program['host']}"
-                        raise WrapException(m)
-
-                    self.wrapdb_provided_programs_v2[program_name] = {
-                        "host": host,
-                        "subproject": SubProject(name),
-                    }
+        wrapdb_deps, wrapdb_programs = split_wrapdb_json(self.wrapdb_v2)
+        self.wrapdb_provided_deps_v2 = wrapdb_deps
+        self.wrapdb_provided_programs_v2 = wrapdb_programs
 
     def load_wrapdb_hosts(self) -> None:
         hosts = get_hosts(self.subdir_root)

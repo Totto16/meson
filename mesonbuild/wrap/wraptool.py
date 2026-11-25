@@ -269,7 +269,7 @@ def install(options: "argparse.Namespace") -> None:
 
     failed = 0
 
-    wrapdb_state = create_wrapdb_host_lookup_state()
+    wrapdb_state = create_wrapdb_host_lookup_state(options.allow_insecure)
 
     for name in dict.fromkeys(options.name):
         try:
@@ -411,7 +411,7 @@ def status(options: "argparse.Namespace") -> None:
         "This should only happen in a non-native subproject",
     )
 
-    wrapdb_state = create_wrapdb_host_lookup_state()
+    wrapdb_state = create_wrapdb_host_lookup_state(options.allow_insecure)
 
     subproject_dir_name = mesonlib.get_subproject_dir()
     if subproject_dir_name is None:
