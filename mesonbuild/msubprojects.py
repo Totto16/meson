@@ -204,9 +204,7 @@ class Runner:
             self.log("  -> Wrap not found in the wrapdb it was originally from")
             return True
 
-        allowed_wrapdb_hosts: list[str] = [
-            h for h in [get_host_from_package_def(self.wrap)] if h is not None
-        ]
+        allowed_wrapdb_hosts: set[str] = {wrapdb_host}
 
         # Determine current version
         try:

@@ -228,7 +228,7 @@ def install_one(
 
     url: HTTPResponse = open_wrapdburl(
         f"https://{wrapdb_host}/v2/{name}_{version}-{revision}/{name}.wrap",
-        [wrapdb_host],
+        {wrapdb_host},
         allow_insecure,
         True,
         True,
@@ -283,7 +283,7 @@ def install(options: "argparse.Namespace") -> None:
 
 
 def get_current_version(
-    wrapfile: str, allowed_wrapdb_hosts: list[str]
+    wrapfile: str, allowed_wrapdb_hosts: set[str]
 ) -> T.Tuple[str, str, str, str, T.Optional[str]]:
     cp = configparser.ConfigParser(interpolation=None)
     cp.read(wrapfile)
@@ -478,12 +478,10 @@ def update_db(options: "argparse.Namespace") -> None:
             options.allow_insecure, subproject_dir_name, options.additional_wrapdb_host
         )
 
-    wrapdb_data: WrapDBV2 = {"version": "2", "entries": []}
+    wrapdb_data: WrapDBV2 = {"version": "2", "entries": {}}
     for wrapdb_host in hosts:
         data = get_releases_data(options.allow_insecure, wrapdb_host)
-        wrapdb_data["entries"].append(
-            {"host": wrapdb_host, "entries": json.loads(data)}
-        )
+        wrapdb_data["entries"][wrapdb_host] = json.loads(data)
 
     os.makedirs(subproject_dir_name, exist_ok=True)
     with open(

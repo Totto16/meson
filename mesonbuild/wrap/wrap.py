@@ -56,11 +56,7 @@ if T.TYPE_CHECKING:
 
     WrapDBV1: TypeAlias = T.Dict[str, T.Any]
 
-    WrapDBV2EntryValue = TypedDict(
-        "WrapDBV2EntryValue", {"host": str, "entries": WrapDBV1}
-    )
-
-    WrapDBV2Entries: TypeAlias = list[WrapDBV2EntryValue]
+    WrapDBV2Entries: TypeAlias = T.Dict[str, WrapDBV1]
 
     WrapDBV2 = TypedDict(
         "WrapDBV2",
@@ -124,11 +120,11 @@ REQ_TIMEOUT = 30.0
 DEFAULT_WRAPDB_HOST = "wrapdb.mesonbuild.com"
 
 
-def get_valid_whitelist_subdomains(wrapdb_hosts: list[str]) -> list[str]:
+def get_valid_whitelist_subdomains(wrapdb_hosts: set[str]) -> set[str]:
     subdomains: set[str] = {DEFAULT_WRAPDB_HOST}
     subdomains.update(wrapdb_hosts)
 
-    return list(subdomains)
+    return subdomains
 
 
 if sys.version_info >= (3, 14):
@@ -181,7 +177,7 @@ def ssl_truststore() -> T.Optional[ssl.SSLContext]:
 
 
 def whitelist_wrapdb(
-    urlstr: str, allowed_wrapdb_hosts: list[str]
+    urlstr: str, allowed_wrapdb_hosts: set[str]
 ) -> urllib.parse.ParseResult:
     """raises WrapException if not whitelisted subdomain"""
     url = urllib.parse.urlparse(urlstr)
@@ -201,7 +197,7 @@ def whitelist_wrapdb(
 
 def open_wrapdburl(
     urlstring: str,
-    allowed_wrapdb_hosts: list[str],
+    allowed_wrapdb_hosts: set[str],
     allow_insecure: bool = False,
     have_opt: bool = False,
     allow_compression: bool = False,
@@ -272,7 +268,7 @@ def read_and_decompress(resp: http.client.HTTPResponse) -> bytes:
 def get_releases_data(allow_insecure: bool, wrapdb_host: str) -> bytes:
     url = open_wrapdburl(
         f"https://{wrapdb_host}/v2/releases.json",
-        [wrapdb_host],
+        {wrapdb_host},
         allow_insecure,
         True,
         True,
@@ -286,7 +282,7 @@ def get_releases(allow_insecure: bool, wrapdb_host: str) -> T.Dict[str, T.Any]:
     return T.cast("T.Dict[str, T.Any]", json.loads(data.decode()))
 
 
-def get_hosts(subproject_dir_name: str) -> list[str]:
+def get_hosts(subproject_dir_name: str) -> set[str]:
     hosts: set[str] = {DEFAULT_WRAPDB_HOST}
 
     try:
@@ -297,9 +293,9 @@ def get_hosts(subproject_dir_name: str) -> list[str]:
             for wrapdb_host in wrapdb_hosts:
                 hosts.add(wrapdb_host["host"])
     except FileNotFoundError:
-        return list(hosts)
+        pass
 
-    return list(hosts)
+    return hosts
 
 
 def create_wrapdb_host_lookup_state(
@@ -320,12 +316,12 @@ def create_wrapdb_host_lookup_state(
         wrapdb = None if raw_wrapdb is None else raw_wrapdb["entries"]
 
     if wrapdb is None:
-        wrapdb = []
+        wrapdb = {}
         wrapdb_hosts_raw = get_hosts(subproject_dir_name)
 
         for wrapdb_host in wrapdb_hosts_raw:
             data = get_releases_data(allow_insecure, wrapdb_host)
-            wrapdb.append({"host": wrapdb_host, "entries": json.loads(data)})
+            wrapdb[wrapdb_host] = json.loads(data)
     else:
         # check if we have a hosts file, if we have on check that all hosts are in the wrapdb.json file (Don't update it, just fetch the new ones)
         wrapdb_hosts: WrapDBHostType
@@ -341,11 +337,8 @@ def create_wrapdb_host_lookup_state(
 
             data = get_releases_data(allow_insecure, wrapdb_host["host"])
 
-            entries: WrapDBV2EntryValue = {
-                "host": wrapdb_host["host"],
-                "entries": json.loads(data),
-            }
-            wrapdb.append(entries)
+            if wrapdb.get(wrapdb_host["host"], None) is None:
+                wrapdb[wrapdb_host["host"]] = json.loads(data)
 
     wrapdb_deps, wrapdb_programs = split_wrapdb_json(wrapdb)
 
@@ -427,7 +420,7 @@ def update_wrap_file(
 ) -> None:
     url = open_wrapdburl(
         f"https://{wrapdb_host}/v2/{name}_{new_version}-{new_revision}/{name}.wrap",
-        [wrapdb_host],
+        {wrapdb_host},
         allow_insecure,
         True,
         True,
@@ -437,7 +430,7 @@ def update_wrap_file(
 
 
 def parse_patch_url(
-    patch_url: str, allowed_wrapdb_hosts: list[str]
+    patch_url: str, allowed_wrapdb_hosts: set[str]
 ) -> T.Tuple[str, str]:
     u = urllib.parse.urlparse(patch_url)
     whitelist_subdomains = get_valid_whitelist_subdomains(allowed_wrapdb_hosts)
@@ -753,12 +746,7 @@ def migrate_wrapdb_to_v2(wrapdb: WrapDBType) -> WrapDBV2:
         case "1":
             wrapdb_v2: WrapDBV2 = {
                 "version": "2",
-                "entries": [
-                    {
-                        "host": DEFAULT_WRAPDB_HOST,
-                        "entries": T.cast("WrapDBV1", wrapdb),
-                    }
-                ],
+                "entries": {DEFAULT_WRAPDB_HOST: T.cast("WrapDBV1", wrapdb)},
             }
             return wrapdb_v2
         case "2":
@@ -785,9 +773,8 @@ def split_wrapdb_json(
     wrapdb_provided_deps: WrapDBDepsV2Entries = {}
     wrapdb_provided_programs: WrapDBProgramsV2Entries = {}
 
-    for entry in entries:
-        host = entry["host"]
-        for name, info in entry["entries"].items():
+    for host, entry in entries.items():
+        for name, info in entry.items():
 
             prev_wrap_name = wrap_names.get(name, None)
             if prev_wrap_name is not None:
@@ -830,7 +817,7 @@ class Resolver:
     wrap_frontend: bool = False
     allow_insecure: bool = False
     silent: bool = False
-    allowed_wrapdb_hosts: list[str] = field(default_factory=list)
+    allowed_wrapdb_hosts: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         self.subdir_root = os.path.join(self.source_dir, self.subdir)
@@ -844,15 +831,15 @@ class Resolver:
         self.netrc: T.Optional[netrc] = None
         self.provided_deps: T.Dict[str, WrapPackageDefinition] = {}
         self.provided_programs: T.Dict[str, WrapPackageDefinition] = {}
-        self.wrapdb_entries: WrapDBV2Entries = []
+        self.wrapdb_entries: WrapDBV2Entries = {}
         self.wrapdb_provided_deps: WrapDBDepsV2Entries = {}
         self.wrapdb_provided_programs: WrapDBProgramsV2Entries = {}
-        self.allowed_wrapdb_hosts = [DEFAULT_WRAPDB_HOST]
+        self.allowed_wrapdb_hosts = {DEFAULT_WRAPDB_HOST}
         self.loaded_dirs: T.Set[str] = set()
         self.cargolocks: T.Dict[str, T.Optional[CargoLock]] = {}
         self.load_netrc()
-        self.load_wrapdb()
         self.load_wrapdb_hosts()
+        self.load_wrapdb()
         self.load_wraps()
 
     def load_netrc(self) -> None:
@@ -959,9 +946,7 @@ class Resolver:
         self.wrapdb_provided_programs = wrapdb_programs
 
     def load_wrapdb_hosts(self) -> None:
-        hosts: list[str] = get_hosts(self.subdir_root)
-
-        self.allowed_wrapdb_hosts = hosts
+        self.allowed_wrapdb_hosts = get_hosts(self.subdir_root)
 
     def get_from_wrapdb(self, subp_name: str) -> T.Optional[PackageDefinitionWithHost]:
 
@@ -969,12 +954,12 @@ class Resolver:
         wrapdb_host: str = ""
         found = False
 
-        for entry in self.wrapdb_entries:
-            info = entry["entries"].get(subp_name)
+        for host, entry in self.wrapdb_entries.items():
+            info = entry.get(subp_name)
             if not info:
                 continue
 
-            wrapdb_host = entry["host"]
+            wrapdb_host = host
             found = True
 
         if not found or info is None:
@@ -985,7 +970,7 @@ class Resolver:
         version, revision = latest_version.rsplit("-", 1)
         url = open_wrapdburl(
             f"https://{wrapdb_host}/v2/{subp_name}_{version}-{revision}/{subp_name}.wrap",
-            [wrapdb_host],
+            {wrapdb_host},
             allow_compression=True,
         )
         fname = Path(self.subdir_root, f"{subp_name}.wrap")
