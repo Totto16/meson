@@ -410,7 +410,7 @@ def update_hosts(
     final_hosts: WrapDBHostType = [{"host": h} for h in hosts]
 
     with Path(subproject_dir_name, "wrapdb_hosts.json").open(
-        "wb", encoding="utf-8"
+        "w", encoding="utf-8"
     ) as f:
         json.dump(final_hosts, f)
 
