@@ -147,9 +147,7 @@ class Runner:
         # FIXME: Do a copy because Resolver.resolve() is stateful method that
         # cannot be called from multiple threads.
         self.wrap_resolver = copy.copy(r)
-        self.wrap_resolver.dirname = os.path.join(
-            r.subdir_root, self.wrap["def"].directory
-        )
+        self.wrap_resolver.dirname = os.path.join(r.subdir_root, self.wrap.directory)
         self.wrap_resolver.wrap = self.wrap
         self.run_method: T.Callable[[], bool] = self.options.subprojects_func.__get__(
             self
@@ -160,13 +158,13 @@ class Runner:
         self.log_queue.append((list(args), kwargs))
 
     def run(self) -> bool:
-        self.logger.start(self.wrap["def"].name)
+        self.logger.start(self.wrap.name)
         try:
             result = self.run_method()
         except MesonException as e:
             self.log(mlog.red("Error:"), str(e))
             result = False
-        self.logger.done(self.wrap["def"].name, self.log_queue)
+        self.logger.done(self.wrap.name, self.log_queue)
         return result
 
     @staticmethod
@@ -186,21 +184,21 @@ class Runner:
         }
 
     def update_wrapdb(self) -> bool:
-        self.log(f"Checking latest WrapDB version for {self.wrap["def"].name}...")
+        self.log(f"Checking latest WrapDB version for {self.wrap.name}...")
         options = T.cast("UpdateWrapDBArguments", self.options)
 
         # Check if this wrap is in WrapDB
-        host_info = options.releases.get(self.wrap["host"])
+        host_info = options.releases.get(self.wrap.host)
         if not host_info:
             self.log("  -> Wrap not found in any wrapdb")
             return True
 
-        info = host_info.get(self.wrap["def"].name)
+        info = host_info.get(self.wrap.name)
         if not info:
             self.log("  -> Wrap not found in the wrapdb it was originally from")
             return True
 
-        allowed_wrapdb_hosts = [self.wrap["host"]]
+        allowed_wrapdb_hosts = [self.wrap.host]
 
         # Determine current version
         try:
@@ -248,6 +246,7 @@ class Runner:
                 new_branch,
                 new_revision,
                 options.allow_insecure,
+                self.wrap.host,
             )
             self.log("  -> New version downloaded:", mlog.blue(latest_version))
         else:
@@ -968,13 +967,13 @@ def run(options: "Arguments") -> int:
     asyncio.set_event_loop(loop)
     executor = ThreadPoolExecutor(options.num_processes)
     if types:
-        wraps = [wrap for wrap in wraps if wrap["def"].type in types]
+        wraps = [wrap for wrap in wraps if wrap.type in types]
     pre_func = getattr(options, "pre_func", None)
     if pre_func:
         pre_func(options)
     logger = Logger(len(wraps))
     for wrap in wraps:
-        dirname = as_posix(source_dir, subproject_dir, wrap["def"].directory)
+        dirname = as_posix(source_dir, subproject_dir, wrap.directory)
         runner = Runner(logger, r, wrap, dirname, options)
         task = loop.run_in_executor(executor, runner.run)
         tasks.append(task)

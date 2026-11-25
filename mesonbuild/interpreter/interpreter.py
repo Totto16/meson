@@ -1845,7 +1845,7 @@ class Interpreter(InterpreterBase, HoldableObject):
         wrap_mode = WrapMode.from_string(wrap_mode_s)
 
         fallback: SubProject | None = \
-            self.environment.wrap_resolver.find_program_provider(args) \
+            self.environment.wrap_resolver.find_program_provider(args)['subproject'] \
             if self.environment.wrap_resolver is not None \
             else None
         if fallback and (wrap_mode == WrapMode.forcefallback or fallback in force_fallback_for):

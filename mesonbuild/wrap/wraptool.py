@@ -8,6 +8,7 @@ import sys, os
 import configparser
 import shutil
 import typing as T
+import json
 
 from glob import glob
 from .wrap import (
@@ -227,7 +228,7 @@ def install_one(
 
     url: HTTPResponse = open_wrapdburl(
         f"https://{wrapdb_host}/v2/{name}_{version}-{revision}/{name}.wrap",
-        wrapdb_host,
+        [wrapdb_host],
         allow_insecure,
         True,
         True,
@@ -282,7 +283,7 @@ def install(options: "argparse.Namespace") -> None:
 
 
 def get_current_version(
-    wrapfile: str, wrapdb_host: str
+    wrapfile: str, allowed_wrapdb_hosts: list[str]
 ) -> T.Tuple[str, str, str, str, T.Optional[str]]:
     cp = configparser.ConfigParser(interpolation=None)
     cp.read(wrapfile)
@@ -299,7 +300,7 @@ def get_current_version(
         branch = mesonlib.search_version(wrap_data["source_filename"])
         revision, patch_filename = "1", None
     else:
-        branch, revision = parse_patch_url(patch_url, wrapdb_host)
+        branch, revision = parse_patch_url(patch_url, allowed_wrapdb_hosts)
         patch_filename = wrap_data["patch_filename"]
     return (
         branch,
@@ -412,6 +413,14 @@ def status(options: "argparse.Namespace") -> None:
 
     wrapdb_state = create_wrapdb_host_lookup_state()
 
+    subproject_dir_name = mesonlib.get_subproject_dir()
+    if subproject_dir_name is None:
+        raise SystemExit(
+            "Subproject dir not found. Run this script in your source root directory."
+        )
+
+    allowed_wrapdb_hosts = get_hosts(subproject_dir_name)
+
     for w in glob(f"{subdir}/*.wrap"):
         name = os.path.basename(w)[:-5]
         try:
@@ -426,7 +435,7 @@ def status(options: "argparse.Namespace") -> None:
             continue
         try:
             current_branch, current_revision, _, _, _ = get_current_version(
-                w, wrapdb_host
+                w, allowed_wrapdb_hosts
             )
         except Exception:
             print("", name, "Wrap file not from wrapdb.", file=sys.stderr)
@@ -472,11 +481,15 @@ def update_db(options: "argparse.Namespace") -> None:
     wrapdb_data: WrapDBV2 = {"version": "2", "entries": []}
     for wrapdb_host in hosts:
         data = get_releases_data(options.allow_insecure, wrapdb_host)
-        wrapdb_data["entries"].append({"host": wrapdb_host, "entries": data})
+        wrapdb_data["entries"].append(
+            {"host": wrapdb_host, "entries": json.loads(data)}
+        )
 
     os.makedirs(subproject_dir_name, exist_ok=True)
-    with open(os.path.join(subproject_dir_name, "wrapdb.json"), "wb") as f:
-        f.write(wrapdb_data)
+    with open(
+        os.path.join(subproject_dir_name, "wrapdb.json"), "w", encoding="utf-8"
+    ) as f:
+        json.dump(wrapdb_data, f)
 
 
 def add_host(options: "argparse.Namespace") -> None:

@@ -98,7 +98,7 @@ def get_nonwrap_subprojects(build_data: build.Build) -> T.Set[str]:
         wrap_mode=WrapMode.nodownload)
     return set(sp
                for sp in build_data.environment.coredata.initialized_subprojects
-               if sp and (sp not in wrap_resolver.wraps or wrap_resolver.wraps[sp].type is None))
+               if sp and (sp not in wrap_resolver.wraps_v2 or wrap_resolver.wraps_v2[sp].type is None))
 
 def run(args: T.List[str]) -> int:
     os.chdir(args[0])
