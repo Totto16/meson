@@ -726,6 +726,7 @@ _meson-wrap() {
     status
     update
     update-db
+    add-host
   )
 
   for i in "$@"; do
@@ -782,6 +783,8 @@ _meson-wrap-install() {
 
   longopts=(
     allow-insecure
+    additional-wrap-host
+    no-wrapdb-hosts-file
     help
   )
 
@@ -808,6 +811,7 @@ _meson-wrap-list() {
 
   longopts=(
     allow-insecure
+    separate-by-host
     help
   )
 
@@ -854,6 +858,7 @@ _meson-wrap-search() {
 
   longopts=(
     allow-insecure
+    print-host
     help
   )
 
@@ -951,6 +956,30 @@ _meson-wrap-update() {
 }
 
 _meson-wrap-update-db() {
+  shortopts=(
+    h
+  )
+
+  longopts=(
+    allow-insecure
+    additional-wrap-host
+    help
+  )
+
+  local cur prev
+  if ! _get_comp_words_by_ref cur prev &>/dev/null; then
+    cur="${COMP_WORDS[COMP_CWORD]}"
+  fi
+
+  if ! _meson_compgen_options "$cur"; then
+    if [[ -z $cur ]]; then
+      COMPREPLY+=($(compgen -P '--' -W '${longopts[*]}'))
+      COMPREPLY+=($(compgen -P '-' -W '${shortopts[*]}'))
+    fi
+  fi
+}
+
+_meson-wrap-add-host() {
   shortopts=(
     h
   )
