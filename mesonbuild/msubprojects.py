@@ -185,23 +185,27 @@ class Runner:
         }
 
     def update_wrapdb(self) -> bool:
-        self.log(f"Checking latest WrapDB version for {self.wrap.name}...")
+        self.log(
+            f"{mlog.bold('Checking latest WrapDB version for')} {mlog.cyan(self.wrap.name)}..."
+        )
         options = T.cast("UpdateWrapDBArguments", self.options)
 
         wrapdb_host = get_host_from_package_def(self.wrap)
         if not wrapdb_host:
-            self.log("  -> Wrap not found in any wrapdb")
+            self.log(f"  -> {mlog.red('Wrap not found in any wrapdb')}")
             return True
 
         # Check if this wrap is in WrapDB
         host_info = options.releases.get(wrapdb_host)
         if not host_info:
-            self.log("  -> Wrap not found in any wrapdb")
+            self.log(f"  -> {mlog.red('Wrap not found in any wrapdb')}")
             return True
 
         info = host_info.get(self.wrap.name)
         if not info:
-            self.log("  -> Wrap not found in the wrapdb it was originally from")
+            self.log(
+                f"  -> {mlog.red('Wrap not found in the wrapdb it was originally from')}: {mlog.purple(wrapdb_host)}"
+            )
             return True
 
         allowed_wrapdb_hosts: set[str] = {wrapdb_host}
@@ -254,9 +258,15 @@ class Runner:
                 options.allow_insecure,
                 wrapdb_host,
             )
-            self.log("  -> New version downloaded:", mlog.blue(latest_version))
+            self.log(
+                "  ->", mlog.green("New version downloaded:"), mlog.blue(latest_version)
+            )
         else:
-            self.log("  -> Already at latest version:", mlog.blue(latest_version))
+            self.log(
+                "  ->",
+                mlog.green("Already at latest version:"),
+                mlog.blue(latest_version),
+            )
 
         return True
 

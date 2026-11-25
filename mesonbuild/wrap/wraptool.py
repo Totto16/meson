@@ -432,7 +432,12 @@ def status(options: "argparse.Namespace") -> None:
                 name, options.allow_insecure, wrapdb_host
             )
         except Exception:
-            print("", name, "not available in any wrapdb.", file=sys.stderr)
+            print(
+                "",
+                mlog.cyan(name),
+                mlog.red("not available in any wrapdb."),
+                file=sys.stderr,
+            )
             continue
         try:
             current_branch, current_revision, _, _, _ = get_current_version(
@@ -444,14 +449,14 @@ def status(options: "argparse.Namespace") -> None:
         if current_branch == latest_branch and current_revision == latest_revision:
             print(
                 "",
-                name,
-                f"up to date. Branch {mlog.blue(current_branch)}, revision {mlog.green(current_revision)}.",
+                mlog.cyan(name),
+                f"{mlog.green('up to date')}. Branch {mlog.blue(current_branch)}, revision {mlog.green(current_revision)}.",
             )
         else:
             print(
                 "",
                 name,
-                f"not up to date. Have {mlog.blue(current_branch)} {mlog.green(current_revision)}, but {mlog.blue(latest_branch)} {mlog.green(latest_revision)} is available.",
+                f"{mlog.cyan('not up to date')}. Have {mlog.blue(current_branch)} {mlog.green(current_revision)}, but {mlog.blue(latest_branch)} {mlog.green(latest_revision)} is available.",
             )
 
 

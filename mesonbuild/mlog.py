@@ -504,6 +504,9 @@ def yellow(text: str) -> AnsiDecorator:
 def blue(text: str) -> AnsiDecorator:
     return AnsiDecorator(text, "\033[1;34m")
 
+def purple(text: str) -> AnsiDecorator:
+    return AnsiDecorator(text, "\033[1;35m")
+
 def cyan(text: str) -> AnsiDecorator:
     return AnsiDecorator(text, "\033[1;36m")
 
@@ -518,6 +521,9 @@ def normal_yellow(text: str) -> AnsiDecorator:
 
 def normal_blue(text: str) -> AnsiDecorator:
     return AnsiDecorator(text, "\033[34m")
+
+def normal_purple(text: str) -> AnsiDecorator:
+    return AnsiDecorator(text, "\033[35m")
 
 def normal_cyan(text: str) -> AnsiDecorator:
     return AnsiDecorator(text, "\033[36m")
