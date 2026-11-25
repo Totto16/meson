@@ -30,7 +30,7 @@ from .. import mesonlib, msubprojects
 if T.TYPE_CHECKING:
     import argparse
 
-    from .wrap import WrapDBV2, WrapHostLookupState
+    from .wrap import WrapDBV2, WrapHostLookupState, WrapDBV1
 
 
 # Note: when adding arguments, please also add them to the completion
@@ -484,10 +484,12 @@ def update_db(options: "argparse.Namespace") -> None:
             options.allow_insecure, subproject_dir_name, options.additional_wrapdb_host
         )
 
-    wrapdb_data: WrapDBV2 = {"version": "2", "entries": {}}
+    wrapdb_data: WrapDBV2 = {"version": "2", "hosts": {}}
     for wrapdb_host in hosts:
         data = get_releases_data(options.allow_insecure, wrapdb_host)
-        wrapdb_data["entries"][wrapdb_host] = json.loads(data)
+        wrapdb_data["hosts"][wrapdb_host] = {
+            "entry": T.cast("WrapDBV1", json.loads(data))
+        }
 
     os.makedirs(subproject_dir_name, exist_ok=True)
     with open(

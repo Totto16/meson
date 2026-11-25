@@ -57,11 +57,17 @@ if T.TYPE_CHECKING:
 
     WrapDBV1: TypeAlias = T.Dict[str, T.Any]
 
-    WrapDBV2Entries: TypeAlias = T.Dict[str, WrapDBV1]
+    # NOTE: this is a wrapper with an object with just one key, so that it is extensible, if we need some settings in the stored json, we can extend this easily and make an absent key resolve to a default value, so this format doesn't need another change with new requirements
+    WrapDBV2Entry = TypedDict(
+        "WrapDBV2Entry",
+        {"entry": WrapDBV1},
+    )
+
+    WrapDBV2Entries: TypeAlias = T.Dict[str, WrapDBV2Entry]
 
     WrapDBV2 = TypedDict(
         "WrapDBV2",
-        {"version": Literal["2"], "entries": WrapDBV2Entries},
+        {"version": Literal["2"], "hosts": WrapDBV2Entries},
     )
 
     WrapDBType: TypeAlias = T.Union["WrapDBV1", "WrapDBV2"]
@@ -95,6 +101,7 @@ if T.TYPE_CHECKING:
         {"version": Literal["2"], "entries": WrapDBProgramsV2Entries},
     )
 
+    # NOTE: this is a wrapper with an object with just one key, so that it is extensible, if we need some settings in the stored json, we can extend this easily and make an absent key resolve to a default value, so this format doesn't need another change with new requirements
     WrapDBHost = TypedDict(
         "WrapDBHost",
         {"host": str},
@@ -278,9 +285,9 @@ def get_releases_data(allow_insecure: bool, wrapdb_host: str) -> bytes:
 
 
 @lru_cache(maxsize=None)
-def get_releases(allow_insecure: bool, wrapdb_host: str) -> T.Dict[str, T.Any]:
+def get_releases(allow_insecure: bool, wrapdb_host: str) -> WrapDBV1:
     data = get_releases_data(allow_insecure, wrapdb_host)
-    return T.cast("T.Dict[str, T.Any]", json.loads(data.decode()))
+    return T.cast("WrapDBV1", json.loads(data.decode()))
 
 
 def get_hosts(subproject_dir_name: str) -> set[str]:
@@ -290,7 +297,7 @@ def get_hosts(subproject_dir_name: str) -> set[str]:
         with Path(subproject_dir_name, "wrapdb_hosts.json").open(
             "r", encoding="utf-8"
         ) as f:
-            wrapdb_hosts: WrapDBHostType = json.load(f)
+            wrapdb_hosts = T.cast("WrapDBHostType", json.load(f))
             for wrapdb_host in wrapdb_hosts:
                 hosts.add(wrapdb_host["host"])
     except FileNotFoundError:
@@ -314,7 +321,7 @@ def create_wrapdb_host_lookup_state(
     wrapdb: T.Optional[WrapDBV2Entries] = wrapdb_info
     if wrapdb is None:
         raw_wrapdb = load_wrapdb_json(subproject_dir_name)
-        wrapdb = None if raw_wrapdb is None else raw_wrapdb["entries"]
+        wrapdb = None if raw_wrapdb is None else raw_wrapdb["hosts"]
 
     if wrapdb is None:
         wrapdb = {}
@@ -322,7 +329,7 @@ def create_wrapdb_host_lookup_state(
 
         for wrapdb_host in wrapdb_hosts_raw:
             data = get_releases_data(allow_insecure, wrapdb_host)
-            wrapdb[wrapdb_host] = json.loads(data)
+            wrapdb[wrapdb_host] = {"entry": T.cast("WrapDBV1", json.loads(data))}
     else:
         # check if we have a hosts file, if we have on check that all hosts are in the wrapdb.json file (Don't update it, just fetch the new ones)
         wrapdb_hosts: WrapDBHostType
@@ -330,7 +337,7 @@ def create_wrapdb_host_lookup_state(
             with Path(subproject_dir_name, "wrapdb_hosts.json").open(
                 "r", encoding="utf-8"
             ) as f:
-                wrapdb_hosts = json.load(f)
+                wrapdb_hosts = T.cast("WrapDBHostType", json.load(f))
         except FileNotFoundError:
             wrapdb_hosts = []
 
@@ -339,7 +346,9 @@ def create_wrapdb_host_lookup_state(
             data = get_releases_data(allow_insecure, wrapdb_host["host"])
 
             if wrapdb.get(wrapdb_host["host"], None) is None:
-                wrapdb[wrapdb_host["host"]] = json.loads(data)
+                wrapdb[wrapdb_host["host"]] = {
+                    "entry": T.cast("WrapDBV1", json.loads(data))
+                }
 
     wrapdb_deps, wrapdb_programs = split_wrapdb_json(wrapdb)
 
@@ -382,7 +391,7 @@ def update_hosts(
         with Path(subproject_dir_name, "wrapdb_hosts.json").open(
             "r", encoding="utf-8"
         ) as f:
-            wrapdb_hosts = json.load(f)
+            wrapdb_hosts = T.cast("WrapDBHostType", json.load(f))
 
     except FileNotFoundError:
         wrapdb_hosts = []
@@ -747,7 +756,7 @@ def migrate_wrapdb_to_v2(wrapdb: WrapDBType) -> WrapDBV2:
         case "1":
             wrapdb_v2: WrapDBV2 = {
                 "version": "2",
-                "entries": {DEFAULT_WRAPDB_HOST: T.cast("WrapDBV1", wrapdb)},
+                "hosts": {DEFAULT_WRAPDB_HOST: {"entry": T.cast("WrapDBV1", wrapdb)}},
             }
             return wrapdb_v2
         case "2":
@@ -760,7 +769,7 @@ def migrate_wrapdb_to_v2(wrapdb: WrapDBType) -> WrapDBV2:
 def load_wrapdb_json(subproject_dir_name: str) -> T.Optional[WrapDBV2]:
     try:
         with Path(subproject_dir_name, "wrapdb.json").open("r", encoding="utf-8") as f:
-            wrapdb_raw: WrapDBType = json.load(f)
+            wrapdb_raw = T.cast("WrapDBType", json.load(f))
             return migrate_wrapdb_to_v2(wrapdb_raw)
     except FileNotFoundError:
         return None
@@ -775,7 +784,7 @@ def split_wrapdb_json(
     wrapdb_provided_programs: WrapDBProgramsV2Entries = {}
 
     for host, entry in entries.items():
-        for name, info in entry.items():
+        for name, info in entry["entry"].items():
 
             prev_wrap_name = wrap_names.get(name, None)
             if prev_wrap_name is not None:
@@ -940,7 +949,7 @@ class Resolver:
         if wrapdb is None:
             return None
 
-        self.wrapdb_entries = wrapdb["entries"]
+        self.wrapdb_entries = wrapdb["hosts"]
 
         wrapdb_deps, wrapdb_programs = split_wrapdb_json(self.wrapdb_entries)
         self.wrapdb_provided_deps = wrapdb_deps
@@ -956,7 +965,7 @@ class Resolver:
         found = False
 
         for host, entry in self.wrapdb_entries.items():
-            info = entry.get(subp_name)
+            info = entry["entry"].get(subp_name)
             if not info:
                 continue
 
