@@ -55,6 +55,9 @@ if T.TYPE_CHECKING:
         rebase: bool
         reset: bool
 
+    # TODO: discuss the usage of $meta and $schema in releases.json
+    # i locally add it and before deploying remove it, but should we just ignore those values when seeing them?
+    # and in wrapdb check for valid keys only (as i do already in my custom fork)
     ReleasesV1 = T.Dict[str, T.Any]
 
     ReleasesV2: TypeAlias = T.Dict[str, ReleasesV1]
